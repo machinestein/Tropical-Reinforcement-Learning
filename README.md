@@ -1,1 +1,1 @@
-# Tropical-Reinfrocement-Learning
+# Tropical-Reinforcement-Learning
