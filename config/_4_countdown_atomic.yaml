@@ -1,0 +1,39 @@
+defaults:
+  - base
+  - countdown_tropic_common
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+trainer:
+  method: ppo
+  experiment_name: countdown-atomic
+
+critic:
+  enable: true
+
+agent_proxy:
+  enable_think: false
+
+actor_rollout_ref:
+  rollout:
+    response_length: 48
+    val_kwargs:
+      temperature: 1.0
+
+custom_envs:
+  Countdown:
+    env_instruction: |
+      Solve Countdown one operation at a time. Use every input occurrence exactly once to reach the target.
+      Output exactly one binary operation using two currently available numbers: a + b, a - b, a * b, or a / b.
+      The environment computes the exact result and replaces those operands. Negative and fractional values are allowed; write fractions as p/q, not decimals.
+      A malformed operation, an unavailable operand, or division by zero ends the attempt unsuccessfully.
+      For numbers [2, 3, 5] and target 4, first output <answer>2 + 5</answer>; with [3, 7], output <answer>7 - 3</answer>.
+    max_tokens: 48
+
+es_manager:
+  format_penalty: 0.0
+  train:
+    group_size: 16

@@ -1,0 +1,23 @@
+defaults:
+  - base
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+trainer:
+  experiment_name: sudoku-main
+
+es_manager:
+  train:
+    env_groups: 8
+    group_size: 16
+    env_configs:
+      tags: ["SimpleSudoku"]
+      n_groups: [8]
+  val:
+    env_groups: 32
+    group_size: 16
+    env_configs:
+      tags: ["SimpleSudoku"]
+      n_groups: [32]

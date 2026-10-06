@@ -1,0 +1,42 @@
+defaults:
+  - base
+  - _self_
+
+trainer:
+  resume_mode: disable
+  test_freq: 25
+  logger: [console]
+  gradient_analysis_mode: false
+
+critic:
+  enable: false
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+
+actor_rollout_ref:
+  actor:
+    use_ref: false
+    use_kl_loss: false
+    entropy_coeff: 0.0
+    ppo_epochs: 1
+    use_dynamic_bsz: false
+    entropy_from_logits_with_chunking: true
+    optim:
+      weight_decay: 0.0
+  rollout:
+    temperature: 1.0
+    top_p: 1.0
+    top_k: -1
+    n: 1
+    rollout_filter_value: 1.0
+    rollout_filter_include_zero: true
+    rollout_filter_top_p_prob_mode: softmax
+
+es_manager:
+  val:
+    group_size: 8
+
+sokoban_baseline:
+  score_batch_size: 64

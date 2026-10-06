@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webshop-minimal"
+version = "0.1.0"
+description = "Pinned WebShop simulator runtime"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["webshop_minimal", "webshop_minimal.*"]
+
+[tool.setuptools.package-data]
+webshop_minimal = ["search_engine/**/*", "templates/*", "data/**/*", "data/*"]

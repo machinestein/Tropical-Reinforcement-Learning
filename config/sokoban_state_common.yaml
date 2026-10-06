@@ -1,0 +1,43 @@
+defaults:
+  - base
+  - _self_
+
+trainer:
+  method: ppo
+  experiment_name: sokoban-state-ppo
+
+agent_proxy:
+  context_window_mode: single_turn
+  max_context_window: 1
+  max_turn: 10
+  max_actions_per_turn: 1
+  reject_extra_actions: true
+  terminate_on_invalid_action: true
+  enable_think: true
+  root_diagnostics: true
+
+collapse_detection:
+  multi_turn_enabled: false
+
+actor_rollout_ref:
+  actor:
+    use_ref: false
+    entropy_coeff: 0.0
+  rollout:
+    temperature: 1.0
+    top_p: 1.0
+    top_k: -1
+
+custom_envs:
+  CoordSokoban:
+    env_instruction: |
+      You are solving Sokoban. Push all boxes onto targets; boxes cannot be pulled.
+      The observation gives the grid and zero-indexed coordinates of walls, targets, boxes and player.
+      Choose exactly one action: Up, Down, Left or Right.
+    env_config:
+      render_mode: text
+      search_depth: 300
+
+es_manager:
+  train:
+    seed_pool_size: 128

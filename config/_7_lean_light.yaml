@@ -1,0 +1,7 @@
+defaults:
+  - lean_light_common
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config

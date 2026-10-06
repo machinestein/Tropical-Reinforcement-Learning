@@ -1,0 +1,82 @@
+defaults:
+  - base
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+trainer:
+  method: tropic
+  experiment_name: frozenlake-tropic
+  project_name: RAGEN_FROZEN_LAKE
+  resume_mode: disable
+
+critic:
+  enable: false
+
+agent_proxy:
+  context_window_mode: single_turn
+  max_context_window: 1
+  max_turn: 10
+  max_actions_per_turn: 1
+  reject_extra_actions: true
+  terminate_on_invalid_action: true
+  root_diagnostics: true
+
+collapse_detection:
+  multi_turn_enabled: false
+
+actor_rollout_ref:
+  actor:
+    use_ref: false
+    entropy_coeff: 0.0
+    ppo_epochs: 2
+  rollout:
+    temperature: 1.0
+    top_p: 1.0
+    top_k: -1
+    calculate_log_probs: true
+
+custom_envs:
+  CoordFrozenLake:
+    env_type: frozen_lake_tropic
+    max_actions_per_traj: 10
+    env_instruction: |
+      You are solving the FrozenLake puzzle. Move the current Player to the Goal without entering a hole.
+      Coordinates are (row, column), zero-indexed from the top-left. Rows increase downward and columns increase to the right.
+      From (r, c), Left moves to (r, c-1), Down to (r+1, c), Right to (r, c+1), and Up to (r-1, c).
+      Movement is deterministic. A move outside the board leaves you in the same cell and wastes an action; there is no wraparound.
+      Grid symbols: P is the current player, G is the goal, O is a hole, and _ is safe ice. Entering a hole ends the episode in failure.
+      Start is the original starting cell, not necessarily your current position. Use the current Player coordinates to plan a route around holes to the Goal within the remaining action budget.
+      You see only the current state each turn. Plan the route, but output exactly its FIRST move, then reconsider the next observation.
+      Use <think>your reasoning</think><answer>ACTION</answer>, replacing ACTION with one available action name.
+      Multiple actions or an invalid action end the episode.
+    env_config:
+      success_rate: 1.0
+      observation_format: grid_coord
+      max_steps: 10
+
+es_manager:
+  train:
+    group_size: 8
+    seed_pool_size: 128
+    env_configs:
+      tags: [CoordFrozenLake]
+  val:
+    env_configs:
+      tags: [CoordFrozenLake]
+
+tropic:
+  collection_only: false
+  waves_per_iteration: 2
+  frontier_enabled: true
+  composition_enabled: true
+  coverage_enabled: false
+  frontier_eta: 1.0
+  top_l: 4
+  basis_size: 2
+  max_edges_per_problem: 1024
+  max_solutions_per_problem: 64
+  max_candidates_per_refresh: 64
+  rescore_batch_size: 64

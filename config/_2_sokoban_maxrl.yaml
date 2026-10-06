@@ -1,0 +1,18 @@
+defaults:
+  - sokoban_baseline_common
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+trainer:
+  method: maxrl
+  experiment_name: sokoban-maxrl
+
+actor_rollout_ref:
+  actor:
+    loss_agg_mode: token-mean
+
+maxrl:
+  epsilon: 1.0e-8

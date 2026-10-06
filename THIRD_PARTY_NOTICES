@@ -1,0 +1,28 @@
+Tropical Reinforcement Learning contains an adaptation of RAGEN-2. The original RAGEN MIT
+license and copyright notice are retained in LICENSE.
+Upstream: https://github.com/mll-lab-nu/RAGEN
+
+The vendored verl/verl runtime is from VERL v0.6.1, revision
+ d62da4950573d7a4b7ef2362337952e7ab59e78d.
+Upstream: https://github.com/volcengine/verl
+Its Apache-2.0 license is retained in verl/LICENSE, together with the
+copyright and license headers in the source files. Documentation, examples,
+tests, build artifacts, and Git history are omitted from this runtime snapshot.
+
+The WebShop simulator and bundled small catalog/search indexes are from
+webshop-minimal, revision 4758174947e5494f0cda3b762508ed4a20a2e4cf.
+Upstream: https://github.com/ZihanWang314/webshop-minimal
+Original environment: https://github.com/princeton-nlp/WebShop
+The upstream adaptation credits Xing Jin and Zihan Wang. The pinned package
+metadata declares MIT licensing but does not contain a LICENSE file; this
+release does not add or replace an upstream license statement.
+The simulator's runtime, templates, bundled data, indexes, and requirements
+are preserved. These are environment resources, not experiment results.
+
+Third-party credits identify upstream software, not the anonymous submission
+authors. Model weights and external datasets are downloaded separately and
+remain subject to their respective terms.
+
+The vendored runtimes use minimal local packaging metadata so installation
+does not require the omitted upstream README files or example directories.
+Runtime source and legal headers are otherwise preserved.

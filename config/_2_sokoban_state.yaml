@@ -1,0 +1,7 @@
+defaults:
+  - sokoban_state_common
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config

@@ -1,0 +1,326 @@
+"""
+Borrowed from verl.trainer.main_ppo.py
+Note that we don't combine the main with ray_trainer as ray_trainer is used by other main.
+"""
+
+from ragen.trainer.agent_trainer import RayAgentTrainer
+
+import ray
+import hydra
+import os
+from verl import DataProto
+import torch
+import numpy as np
+from omegaconf import OmegaConf
+from ragen.utils import register_resolvers
+from ragen.llm_agent.phi import is_phi_model_path
+from ragen.llm_agent.gemma import is_gemma_model_path
+register_resolvers()
+import sys
+import socket
+
+class DummyRewardManager():
+    """The reward manager.
+    """
+
+    def __init__(self, tokenizer, num_examine, compute_score=None) -> None:
+        self.tokenizer = tokenizer
+        self.num_examine = num_examine  
+        self.compute_score = compute_score
+
+    def __call__(self, data: DataProto, return_dict=False):
+        """We will expand this function gradually based on the available datasets"""
+
+        if 'rm_scores' in data.batch.keys():
+            if return_dict:
+                return {
+                    "reward_tensor": data.batch['rm_scores'],
+                }
+            else:
+                return data.batch['rm_scores']
+
+        reward_tensor = torch.zeros_like(data.batch['responses'], dtype=torch.float32)
+
+        all_scores = []
+
+        already_print_data_sources = {}
+
+        for i in range(len(data)):
+            data_item = data[i]  
+
+            prompt_ids = data_item.batch['prompts']
+
+            prompt_length = prompt_ids.shape[-1]
+
+            valid_prompt_length = data_item.batch['attention_mask'][:prompt_length].sum()
+            valid_prompt_ids = prompt_ids[-valid_prompt_length:]
+
+            response_ids = data_item.batch['responses']
+            valid_response_length = data_item.batch['attention_mask'][prompt_length:].sum()
+            valid_response_ids = response_ids[:valid_response_length]
+
+            sequences = torch.cat((valid_prompt_ids, valid_response_ids))
+            sequences_str = self.tokenizer.decode(sequences)
+
+            score = data_item.non_tensor_batch['reward']
+            score = float(score)
+ 
+            reward_tensor[i, valid_response_length - 1] = score
+            all_scores.append(score)
+
+            data_source = data_item.non_tensor_batch.get('data_source', 'default')
+            
+            if data_source not in already_print_data_sources:
+                already_print_data_sources[data_source] = 0
+
+            if already_print_data_sources[data_source] < self.num_examine:
+                already_print_data_sources[data_source] += 1
+                print(sequences_str)
+        
+        print(f"[DEBUG] all_scores: {all_scores}")
+        print(f"[DEBUG] all_scores shape: {np.array(all_scores).shape}")
+        print(f"[DEBUG] all_scores mean: {np.mean(all_scores)}")
+        print(f"[DEBUG] all_scores max: {np.max(all_scores)}")
+        print(f"[DEBUG] all_scores min: {np.min(all_scores)}")
+        print(f"[DEBUG] all_scores std: {np.std(all_scores)}")
+
+        if return_dict:
+            return {
+                "reward_tensor": reward_tensor,
+            }
+        else:
+            return reward_tensor
+
+def get_custom_reward_fn(config):
+    import importlib.util, os
+
+    reward_fn_config = config.get("custom_reward_function") or {}
+    file_path = reward_fn_config.get("path")
+    if not file_path:
+        return None
+
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Reward function file '{file_path}' not found.")
+
+    spec = importlib.util.spec_from_file_location("custom_module", file_path)
+    if spec is None:
+        raise RuntimeError(f"Failed to create module spec from '{file_path}'")
+        
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise RuntimeError(f"Error loading module from '{file_path}': {e}")
+
+    function_name = reward_fn_config.get("name")
+    if not function_name:
+        raise ValueError("Function name not specified in custom_reward_function config")
+
+    if not hasattr(module, function_name):
+        raise AttributeError(f"Reward function '{function_name}' not found in '{file_path}'.")
+
+    print(f"using customized reward function '{function_name}' from '{file_path}'")
+
+    return getattr(module, function_name)
+
+
+
+def add_dependency_and_validate_config(config):
+    if is_gemma_model_path(config.model_path):
+        from ragen.gemma.config import configure_gemma
+        configure_gemma(config)
+    method = config.trainer.get("method", "ppo")
+    if method in ("maxrl", "tstar"):
+        from ragen.sokoban_baselines.config import validate_config
+        validate_config(config)
+        config.data.train_batch_size = config.es_manager.train.env_groups * config.es_manager.train.group_size
+        return config
+    if method == "tropic":
+        from ragen.tropic.config import validate_tropic_config
+        validate_tropic_config(config)
+        config.data.train_batch_size = config.es_manager.train.env_groups * config.es_manager.train.group_size
+        return config
+    if method != "ppo":
+        raise ValueError(f"Unknown trainer method: {method}")
+
+    actor_ppo_micro_batch_size = config.actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu
+    assert actor_ppo_micro_batch_size * config.trainer.n_gpus_per_node <= config.actor_rollout_ref.actor.ppo_mini_batch_size, \
+        f"actor ppo_micro_batch_size_per_gpu * n_gpus_per_node ({actor_ppo_micro_batch_size * config.trainer.n_gpus_per_node}) must be less than or equal to ppo_mini_batch_size ({config.actor_rollout_ref.actor.ppo_mini_batch_size})"
+    assert config.actor_rollout_ref.actor.ppo_mini_batch_size % (actor_ppo_micro_batch_size * config.trainer.n_gpus_per_node) == 0, \
+        f"ppo_mini_batch_size ({config.actor_rollout_ref.actor.ppo_mini_batch_size}) must be divisible by actor ppo_micro_batch_size_per_gpu * n_gpus_per_node ({actor_ppo_micro_batch_size * config.trainer.n_gpus_per_node})"
+    assert ("qwen" in config.model_path.lower() or "llama-3" in config.model_path.lower() or is_phi_model_path(config.model_path)
+            or is_gemma_model_path(config.model_path)) or (not config.enable_response_mask), \
+        "response mask is supported for Qwen, Llama-3, Phi-4-mini-instruct and Gemma-4 models"
+    assert len(str(config.system.CUDA_VISIBLE_DEVICES).split(',')) == config.trainer.n_gpus_per_node, \
+        f"CUDA_VISIBLE_DEVICES ({config.system.CUDA_VISIBLE_DEVICES}) must have the same number of GPUs as n_gpus_per_node ({config.trainer.n_gpus_per_node})"
+    context_window_mode = getattr(config.agent_proxy, "context_window_mode", "full")
+    rollout_filter_strategy = getattr(config.actor_rollout_ref.rollout, "rollout_filter_strategy", "top_p")
+    rollout_filter_value = getattr(config.actor_rollout_ref.rollout, "rollout_filter_value", 0.25)
+    
+    if rollout_filter_strategy in ("top_p", "top_k"):
+        effective_ratio = rollout_filter_value
+    elif rollout_filter_strategy == "top_k_abs":
+        effective_ratio = rollout_filter_value / config.es_manager.train.env_groups
+    else:
+        effective_ratio = 1.0
+
+    if context_window_mode in ("single_turn", "limited_multi_turn"):
+        assert config.es_manager.train.env_groups * config.es_manager.train.group_size * effective_ratio * config.agent_proxy.max_turn >= config.ppo_mini_batch_size, \
+            f"env_groups * group_size * effective_ratio * max_turn ({config.es_manager.train.env_groups * config.es_manager.train.group_size * effective_ratio * config.agent_proxy.max_turn}) must be greater than or equal to ppo_mini_batch_size ({config.ppo_mini_batch_size})"
+    else:
+        assert config.es_manager.train.env_groups * config.es_manager.train.group_size * effective_ratio >= config.ppo_mini_batch_size, \
+            f"env_groups * group_size * effective_ratio ({config.es_manager.train.env_groups * config.es_manager.train.group_size * effective_ratio}) must be greater than or equal to ppo_mini_batch_size ({config.ppo_mini_batch_size})."
+    assert config.algorithm.bi_level_gae == False or config.algorithm.adv_estimator == "gae", "BI_LEVEL_GAE is enabled, so config.algorithm.adv_estimator should be set to gae"
+    assert config.algorithm.bi_level_gae == False or (not config.agent_proxy.use_turn_scores), "BI_LEVEL_GAE is enabled, but currently use_turn_scores are not correctly supported, so config.agent_proxy.use_turn_scores should be set to False" 
+
+    config.data.train_batch_size = config.es_manager.train.env_groups * config.es_manager.train.group_size
+
+
+    return config
+
+
+@hydra.main(version_base=None, config_path="config", config_name="base")
+def main(config):
+    config = add_dependency_and_validate_config(config)
+    print(f"config: {config}")
+
+    run_ppo(config)
+
+
+def run_ppo(config) -> None:
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(config.system.CUDA_VISIBLE_DEVICES)
+    print(f"CUDA_VISIBLE_DEVICES: {os.environ['CUDA_VISIBLE_DEVICES']}")
+    os.environ["ENSURE_CUDA_VISIBLE_DEVICES"] = os.environ.get('CUDA_VISIBLE_DEVICES', '')
+    if not ray.is_initialized():
+        ray_init_cfg = config.get("ray_kwargs", {}).get("ray_init", {})
+        ray_init_kwargs = OmegaConf.to_container(ray_init_cfg, resolve=True) if ray_init_cfg is not None else {}
+        if ray_init_kwargs is None:
+            ray_init_kwargs = {}
+
+        runtime_env = ray_init_kwargs.get("runtime_env", {}) or {}
+        runtime_env_env_vars = runtime_env.get("env_vars", {}) or {}
+        runtime_env["env_vars"] = {
+            'TOKENIZERS_PARALLELISM': 'true',
+            'NCCL_DEBUG': 'WARN',
+            'VLLM_LOGGING_LEVEL': 'WARN',
+            "RAY_DEBUG": "legacy",  
+            **runtime_env_env_vars,
+        }
+        ray_init_kwargs["runtime_env"] = runtime_env
+        print(f"ray init kwargs: {ray_init_kwargs}")
+        ray.init(**ray_init_kwargs)
+
+    runner = TaskRunner.remote()
+    ray.get(runner.run.remote(config))
+
+
+@ray.remote(num_cpus=1)  
+class TaskRunner:
+
+    def run(self, config):
+        from pprint import pprint
+
+        from omegaconf import OmegaConf
+
+        from verl.utils.fs import copy_to_local
+
+        print(f"TaskRunner hostname: {socket.gethostname()}, PID: {os.getpid()}")
+        pprint(OmegaConf.to_container(config, resolve=True))
+        OmegaConf.resolve(config)
+
+        local_path = copy_to_local(config.actor_rollout_ref.model.path)
+
+        from verl.utils import hf_tokenizer, hf_processor
+        tokenizer = hf_tokenizer(local_path)
+        processor = hf_processor(local_path, use_fast=True)  
+
+        if config.actor_rollout_ref.actor.strategy == 'fsdp':
+            assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
+            from ragen.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
+            if config.trainer.get("method", "ppo") == "tropic":
+                from ragen.workers.fsdp_workers import TropicActorRolloutRefWorker
+                ActorRolloutRefWorker = TropicActorRolloutRefWorker
+            elif config.trainer.get("method", "ppo") in ("maxrl", "tstar"):
+                from ragen.sokoban_baselines.worker import SokobanBaselineWorker
+                ActorRolloutRefWorker = SokobanBaselineWorker
+            from verl.single_controller.ray import RayWorkerGroup
+            ray_worker_group_cls = RayWorkerGroup
+
+        else:
+            raise NotImplementedError
+
+        from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
+
+        role_worker_mapping = {
+            Role.ActorRollout: ray.remote(ActorRolloutRefWorker),
+            Role.Critic: ray.remote(CriticWorker),
+        }
+        if config.trainer.get("method", "ppo") in ("tropic", "maxrl", "tstar"):
+            role_worker_mapping.pop(Role.Critic)
+        if config.actor_rollout_ref.actor.use_ref:
+            print("[DEBUG] using ref policy")
+            role_worker_mapping[Role.RefPolicy] = ray.remote(ActorRolloutRefWorker)
+        else:
+            print("[DEBUG] not using ref policy, setting use_kl_loss to False")
+            config.actor_rollout_ref.actor.use_kl_loss = False
+        global_pool_id = 'global_pool'
+        resource_pool_spec = {
+            global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
+        }
+
+        mapping = {
+            Role.ActorRollout: global_pool_id,
+            Role.Critic: global_pool_id,
+        }
+        if config.actor_rollout_ref.actor.use_ref:
+            mapping[Role.RefPolicy] = global_pool_id
+
+        if config.reward_model.enable:
+            if config.reward_model.strategy == 'fsdp':
+                from ragen.workers.fsdp_workers import RewardModelWorker
+            elif config.reward_model.strategy == 'megatron':
+                from verl.workers.megatron_workers import RewardModelWorker
+            else:
+                raise NotImplementedError
+            role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+            mapping[Role.RewardModel] = global_pool_id
+
+        print("using dummy reward manager")
+        reward_manager_cls = DummyRewardManager
+
+        compute_score = get_custom_reward_fn(config)
+        reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=0, compute_score=compute_score)
+
+        val_reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=1, compute_score=compute_score)
+
+        resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
+
+        trainer_class = RayAgentTrainer
+        if config.trainer.get("method", "ppo") == "tropic":
+            from ragen.trainer.tropic_trainer import RayTropicTrainer
+            trainer_class = RayTropicTrainer
+        elif config.trainer.get("method", "ppo") in ("maxrl", "tstar"):
+            from ragen.sokoban_baselines.trainer import RaySokobanBaselineTrainer
+            trainer_class = RaySokobanBaselineTrainer
+        trainer = trainer_class(
+            config=config,
+            tokenizer=tokenizer,
+            processor=processor,
+            role_worker_mapping=role_worker_mapping,
+            resource_pool_manager=resource_pool_manager,
+            ray_worker_group_cls=ray_worker_group_cls,
+            reward_fn=reward_fn,
+            val_reward_fn=val_reward_fn
+        )
+        trainer.init_workers()
+        trainer.init_agent_proxy()
+        trainer.fit()
+
+
+if __name__ == '__main__':
+    import sys
+    sys.argv.extend([
+        "--config-dir", os.path.join(os.path.dirname(__file__), "ragen/config"),
+        "--config-dir", os.path.join(os.path.dirname(__file__), "verl/verl/trainer/config"),
+    ])
+    main()

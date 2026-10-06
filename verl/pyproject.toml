@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verl"
+version = "0.6.1"
+description = "VERL runtime bundled with Tropical Reinforcement Learning"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["verl", "verl.*"]
+
+[tool.setuptools.package-data]
+verl = ["version/*", "trainer/config/*.yaml", "trainer/config/*/*.yaml", "**/*.jinja2", "**/*.yaml", "py.typed"]

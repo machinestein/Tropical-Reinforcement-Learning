@@ -1,0 +1,46 @@
+defaults:
+  - base
+  - _self_
+
+system:
+  CUDA_VISIBLE_DEVICES: "0,1,2,3"
+trainer:
+  project_name: RAGEN_LEAN
+  experiment_name: lean
+  n_gpus_per_node: 4
+agent_proxy:
+  max_turn: 15
+  max_actions_per_turn: 4
+  max_context_window: 5
+actor_rollout_ref:
+  rollout:
+    max_model_len: 8096
+    response_length: 512
+
+custom_envs:
+  Lean:
+    env_config:
+      dataset_name_or_path: CoderBak/minif2f
+      dataset_split: train
+      dataset_revision: aa04566
+      dataset_partition: valid
+      sample_mode: random
+      server_url: http://127.0.0.1:8000
+      max_steps: 100
+      http_timeout: 600
+      max_retries: 1
+
+es_manager:
+  train:
+    env_configs:
+      tags: [Lean]
+  val:
+    env_groups: 244
+    group_size: 8
+    env_configs:
+      tags: [Lean]
+      n_groups: [244]
+    env_config_overrides:
+      Lean:
+        dataset_partition: test
+        sample_mode: sequential

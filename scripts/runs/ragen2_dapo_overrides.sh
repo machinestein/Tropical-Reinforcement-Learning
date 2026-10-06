@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+RAGEN2_DAPO_OVERRIDES=(
+    algorithm.adv_estimator=gae
+    critic.enable=true
+    actor_rollout_ref.actor.loss_agg_mode=token-mean
+    actor_rollout_ref.actor.clip_ratio_low=0.2
+    actor_rollout_ref.actor.clip_ratio_high=0.28
+    actor_rollout_ref.actor.use_kl_loss=false
+    actor_rollout_ref.actor.kl_loss_type=low-var-kl
+    actor_rollout_ref.actor.kl_loss_coef=0.0
+    algorithm.use_kl_in_reward=false
+    algorithm.kl_ctrl.kl_coef=0.0
+    actor_rollout_ref.actor.entropy_coeff=0.001
+    actor_rollout_ref.actor.entropy_from_logits_with_chunking=true
+    actor_rollout_ref.actor.filter_loss_scaling=none
+    actor_rollout_ref.rollout.rollout_filter_strategy=top_p
+    actor_rollout_ref.rollout.rollout_filter_value=1.0
+    actor_rollout_ref.rollout.rollout_filter_top_p_prob_mode=softmax
+    actor_rollout_ref.rollout.rollout_filter_type=largest
+    actor_rollout_ref.rollout.rollout_filter_metric=reward_variance
+    actor_rollout_ref.rollout.rollout_filter_include_zero=true
+)

@@ -1,0 +1,8 @@
+defaults:
+  - base
+  - countdown_tropic_common
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config

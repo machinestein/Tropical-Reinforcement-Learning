@@ -1,0 +1,27 @@
+defaults:
+  - sokoban_baseline_common
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+trainer:
+  method: tstar
+  experiment_name: sokoban-tstar
+
+actor_rollout_ref:
+  actor:
+    loss_agg_mode: seq-mean-token-mean
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.2
+
+tstar:
+  kl_threshold: 0.25
+  kl_samples: 16
+  gamma: 0.99
+  divergence_threshold: 0.3
+  surgical_weight: 0.15
+  beta: 0.1
+  ema_alpha: 0.95
+  graft_batch_size: 128
